@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.gitlab.api.http.GitlabHTTPRequestor;
 import org.gitlab.api.http.Query;
 import org.gitlab.api.models.*;
+import org.gitlab.api.query.PaginationQuery;
+import org.gitlab.api.query.PipelinesQuery;
+import org.gitlab.api.query.ProjectsQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +42,7 @@ public class GitlabAPI {
 
     private static final String DEFAULT_API_NAMESPACE = "/api/v4";
     private static final String PARAM_SUDO = "sudo";
+    private static final String PARAM_WITH_PROJECTS = "with_projects";
     private static final String PARAM_MAX_ITEMS_PER_PAGE = new Pagination().withPerPage(Pagination.MAX_ITEMS_PER_PAGE).toString();
 
     private final String hostUrl;
@@ -464,8 +468,24 @@ public class GitlabAPI {
         return getGroup(groupId.toString());
     }
 
+    public GitlabGroup getGroupWithoutProjects(Integer groupId) throws IOException {
+        return getGroupWithoutProjects(groupId.toString());
+    }
+
     /**
-     * Get a group by path
+     * Get a group by path.  Don't include the projects.
+     *
+     * @param path Path of the group
+     * @return {@link GitlabGroup} object
+     *
+     * @throws IOException on gitlab api call error
+     */
+    public GitlabGroup getGroupWithoutProjects(String path) throws IOException {
+        return getGroup(path, false);
+    }
+
+    /**
+     * Get a group by path, including its projects.
      *
      * @param path Path of the group
      * @return {@link GitlabGroup} object
@@ -473,8 +493,24 @@ public class GitlabAPI {
      * @throws IOException on gitlab api call error
      */
     public GitlabGroup getGroup(String path) throws IOException {
+        return getGroup(path, true);
+    }
+
+    /**
+     * Get a group by path
+     *
+     * @param path Path of the group
+     * @param withProjects If true, include the projects
+     * @return {@link GitlabGroup} object
+     *
+     * @throws IOException on gitlab api call error
+     */
+    public GitlabGroup getGroup(String path, boolean withProjects) throws IOException {
         String tailUrl = GitlabGroup.URL + "/" + URLEncoder.encode(path, "UTF-8");
-        return retrieve().to(tailUrl, GitlabGroup.class);
+        Query query = new Query()
+	    .append(PARAM_WITH_PROJECTS, "" + withProjects);
+
+        return retrieve().to(tailUrl + query.toString(), GitlabGroup.class);
     }
 
     public List<GitlabGroup> getGroups() throws IOException {
@@ -844,6 +880,16 @@ public class GitlabAPI {
     }
 
     /**
+     * Get a list of projects accessible by the authenticated user.
+     *
+     * @return A list of gitlab projects
+     */
+    public List<GitlabProject> getProjects(ProjectsQuery projectsQuery) {
+        String tailUrl = GitlabProject.URL + projectsQuery;
+        return retrieve().getAll(tailUrl, GitlabProject[].class);
+    }
+
+    /**
      * Get a list of projects by pagination accessible by the authenticated user.
      *
      * @param pagination
@@ -977,6 +1023,70 @@ public class GitlabAPI {
     }
 
     /**
+     * Get a project's pipeline
+     *
+     * @param project the project
+     * @param pipeline the pipeline
+     * @return The project pipeline
+     */
+    public GitlabPipeline getProjectPipeline(GitlabProject project, GitlabPipeline pipeline) throws IOException {
+        return getProjectPipeline(project.getId(), pipeline.getId());
+    }
+
+    /**
+     * Get a project's pipeline
+     *
+     * @param projectId the project id
+     * @param pipelineId the pipeline id
+     * @return The project pipeline
+     */
+    public GitlabPipeline getProjectPipeline(Integer projectId, Integer pipelineId) throws IOException {
+        String tailUrl = GitlabProject.URL + "/" + sanitizeProjectId(projectId) + GitlabPipeline.URL + "/" + sanitizeId(pipelineId, "pipelineId");
+        return retrieve().to(tailUrl, GitlabPipeline.class);
+    }
+
+    /**
+     * Get a list of a project's pipelines in Gitlab
+     *
+     * @param project the project
+     * @return A list of project pipelines
+     */
+    public List<GitlabPipeline> getProjectPipelines(GitlabProject project) {
+        return getProjectPipelines(project.getId());
+    }
+
+    /**
+     * Get a list of a project's pipelines in Gitlab
+     *
+     * @param projectId the project id
+     * @return A list of project pipelines
+     */
+    public List<GitlabPipeline> getProjectPipelines(Integer projectId) {
+        return getProjectPipelines(projectId, new PipelinesQuery().withPerPage(PaginationQuery.MAX_ITEMS_PER_PAGE));
+    }
+
+    /**
+     * Get a list of a project's pipelines in Gitlab
+     *
+     * @param project the project
+     * @return A list of project pipelines
+     */
+    public List<GitlabPipeline> getProjectPipelines(GitlabProject project, PipelinesQuery pipelinesQuery) {
+        return getProjectPipelines(project.getId(), pipelinesQuery);
+    }
+
+    /**
+     * Get a list of a project's pipelines in Gitlab
+     *
+     * @param projectId the project id
+     * @return A list of project pipelines
+     */
+    public List<GitlabPipeline> getProjectPipelines(Integer projectId, PipelinesQuery pipelinesQuery) {
+        String tailUrl = GitlabProject.URL + "/" + sanitizeProjectId(projectId) + GitlabPipeline.URL + pipelinesQuery;
+        return retrieve().getAll(tailUrl, GitlabPipeline[].class);
+    }
+
+    /**
      * Gets a list of a project's jobs in Gitlab
      *
      * @param project the project
@@ -997,6 +1107,33 @@ public class GitlabAPI {
         return retrieve().getAll(tailUrl, GitlabJob[].class);
     }
 
+
+    /**
+     * Run pipeline for selected project and branch
+     * @param project project
+     * @param ref branch
+     * @param variables pipeline variables
+     * @return Created pipeline
+     * @throws IOException
+     */
+    public GitlabPipeline runPipeline(GitlabProject project, String ref, List<GitlabBuildVariable> variables) throws IOException {
+        return runPipeline(project.getId(), ref, variables);
+    }
+
+
+    /**
+     * Run pipeline for selected project and branch
+     * @param projectId project's id
+     * @param ref branch
+     * @param variables pipeline variables
+     * @return Created pipeline
+     * @throws IOException
+     */
+    public GitlabPipeline runPipeline(Integer projectId, String ref, List<GitlabBuildVariable> variables) throws IOException {
+        Query query = new Query().appendIf("ref", ref);
+        String tailUrl = GitlabProject.URL + "/" + sanitizeProjectId(projectId) + GitlabPipeline.CREATE_URL + query.toString();
+        return dispatch().with("variables", variables).to(tailUrl, GitlabPipeline.class);
+    }
 
     /**
      * Gets a list of project's jobs of the given pipeline in Gitlab
@@ -1167,7 +1304,8 @@ public class GitlabAPI {
                 .appendIf("request_access_enabled", project.isRequestAccessEnabled())
                 .appendIf("repository_storage", project.getRepositoryStorage())
                 .appendIf("approvals_before_merge", project.getApprovalsBeforeMerge())
-                .appendIf("printing_merge_request_link_enabled", project.isPrintingMergeRequestLinkEnabled());
+                .appendIf("printing_merge_request_link_enabled", project.isPrintingMergeRequestLinkEnabled())
+		.appendIf("initialize_with_readme",project.isInitializeWithReadme());
 
         GitlabNamespace namespace = project.getNamespace();
         if (namespace != null) {
@@ -1316,14 +1454,28 @@ public class GitlabAPI {
     /**
      * @param namespace The namespace of the fork
      * @param projectId ProjectId of the project forked
+     * @param path The path that will be assigned to the resultant project after forking. (Optional)
+     * @param name The name that will be assigned to the resultant project after forking. (Optional)
+     * @return The new Gitlab Project
+     * @throws IOException on gitlab api call error
+     */
+    public GitlabProject createFork(String namespace, Integer projectId, String path, String name) throws IOException {
+        Query query = new Query()
+            .appendIf("namespace", namespace)
+            .appendIf("path", path)
+            .appendIf("name", name);
+        String tailUrl = GitlabProject.URL + "/" + projectId + "/fork" + query.toString();
+        return dispatch().to(tailUrl, GitlabProject.class);
+    }
+
+    /**
+     * @param namespace The namespace of the fork
+     * @param projectId ProjectId of the project forked
      * @return The new Gitlab Project
      * @throws IOException on gitlab api call error
      */
     public GitlabProject createFork(String namespace, Integer projectId) throws IOException {
-        Query query = new Query()
-                .appendIf("namespace", namespace);
-        String tailUrl = GitlabProject.URL + "/" + projectId + "/fork" + query.toString();
-        return dispatch().to(tailUrl, GitlabProject.class);
+        return createFork(namespace, projectId, null, null);
     }
 
     /**
@@ -1973,13 +2125,9 @@ public class GitlabAPI {
             projectId = mergeRequest.getProjectId();
         }
 
-        Query query = new Query()
-                .append("ref_name", mergeRequest.getSourceBranch());
-
-        query.mergeWith(pagination.asQuery());
-
         String tailUrl = GitlabProject.URL + "/" + sanitizeProjectId(projectId) +
-                "/repository" + GitlabCommit.URL + query.toString();
+                GitlabMergeRequest.URL + "/" + mergeRequest.getIid() +
+                GitlabCommit.URL + pagination.toString();
 
         GitlabCommit[] commits = retrieve().to(tailUrl, GitlabCommit[].class);
         return Arrays.asList(commits);
@@ -1995,7 +2143,7 @@ public class GitlabAPI {
 
     public List<GitlabCommit> getCommits(Serializable projectId, Pagination pagination,
                                          String branchOrTag) throws IOException {
-        return getCommits(projectId, null, branchOrTag, null);
+        return getCommits(projectId, pagination, branchOrTag, null);
     }
 
     public List<GitlabCommit> getCommits(Serializable projectId, Pagination pagination,
@@ -2375,14 +2523,12 @@ public class GitlabAPI {
 
     public List<GitlabProjectHook> getProjectHooks(Serializable projectId) throws IOException {
         String tailUrl = GitlabProject.URL + "/" + sanitizeProjectId(projectId) + GitlabProjectHook.URL;
-        GitlabProjectHook[] hooks = retrieve().to(tailUrl, GitlabProjectHook[].class);
-        return Arrays.asList(hooks);
+        return retrieve().getAll(tailUrl, GitlabProjectHook[].class);
     }
 
     public List<GitlabProjectHook> getProjectHooks(GitlabProject project) throws IOException {
         String tailUrl = GitlabProject.URL + "/" + project.getId() + GitlabProjectHook.URL;
-        GitlabProjectHook[] hooks = retrieve().to(tailUrl, GitlabProjectHook[].class);
-        return Arrays.asList(hooks);
+        return retrieve().getAll(tailUrl, GitlabProjectHook[].class);
     }
 
     public GitlabProjectHook getProjectHook(GitlabProject project, String hookId) throws IOException {
@@ -3290,7 +3436,7 @@ public class GitlabAPI {
 
     private String sanitizePath(String branch) {
         try {
-            return URLEncoder.encode(branch, "UTF-8");
+            return URLEncoder.encode(branch, "UTF-8").replaceAll("\\+", "%20");
         } catch (UnsupportedEncodingException e) {
             throw new RuntimeException((e));
         }
